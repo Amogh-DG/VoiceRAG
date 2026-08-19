@@ -4,13 +4,15 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from backend.common.schemas import QueryRequest, QueryResponse, ChunkReference, Chunk
+from backend.common.schemas import AskRequest, AskResponse, SourceDocument, Chunk
 from backend.embeddings.wrapper import EmbeddingModelWrapper
 from backend.retrieval.vector_db import MockVectorDB
 from backend.generation.generator import LLMGenerator
 from backend.harness.orchestrator import PipelineOrchestrator
 
 from contextlib import asynccontextmanager
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 # Load environment variables
 load_dotenv()
@@ -63,6 +65,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Custom handler to return HTTP 400 Bad Request on input schema validation failure
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "Input validation failed: malformed JSON or missing required fields."}
+    )
+
 # Enable CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
@@ -77,51 +87,46 @@ def read_root():
     """Service status healthcheck endpoint."""
     return {"status": "healthy", "service": "RAG Backend Scaffolding"}
 
-@app.post("/ask", response_model=QueryResponse, status_code=status.HTTP_200_OK)
-async def ask_question(request: QueryRequest):
+@app.post(
+    "/ask",
+    response_model=AskResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Submit user query to the RAG pipeline",
+    description="Exposes end-to-end RAG question answering. Runs the user query through guardrails, context retrieval, LLM generation, and hallucination checks."
+)
+async def ask_question(request: AskRequest):
     """Processes user query, retrieves relevant contexts, and generates an answer."""
+    # Custom validation: raise HTTP 400 for empty or whitespace-only query
+    if not request.query or not request.query.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Query cannot be empty or whitespace-only."
+        )
+
+    start_time = time.perf_counter()
     try:
-        start_time = time.perf_counter()
-        
-        # 1. Fetch query embedding
-        query_embedding = await embedder.embed_query(request.query)
-        
-        # 2. Query Vector DB using the embedding
-        retrieved_chunks = await vector_db.similarity_search(
-            query_embedding=query_embedding,
-            k=request.k,
-            filters=request.filters
-        )
-        
-        # 3. Generate response using Orchestrator
-        gen_response = await orchestrator.run_pipeline(query=request.query, k=request.k)
-        
-        # 4. Map internal chunks to public response metadata references
-        context_refs = [
-            ChunkReference(
-                chunk_id=chunk.id,
-                document_id=chunk.parent_doc_id,
-                content=chunk.content,
-                metadata=chunk.metadata
+        # Run user query through the pipeline orchestrator
+        pipeline_result = await orchestrator.run_pipeline(query=request.query)
+
+        # Map pipeline's internal context ChunkReferences to client-facing SourceDocuments
+        sources = [
+            SourceDocument(
+                document_id=ref.document_id,
+                text=ref.content,
+                metadata=ref.metadata
             )
-            for chunk in retrieved_chunks
+            for ref in pipeline_result.context
         ]
-        
-        elapsed_time = time.perf_counter() - start_time
-        
-        # 5. Build and return API QueryResponse
-        return QueryResponse(
-            query=request.query,
-            answer=gen_response.answer,
-            context=context_refs,
-            is_grounded=gen_response.is_grounded,
-            is_refused=gen_response.is_refused,
-            metadata={
-                "elapsed_seconds": elapsed_time,
-                "generation_metadata": gen_response.metadata
-            }
+
+        # Calculate actual end-to-end wall-clock latency in milliseconds
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+        return AskResponse(
+            answer=pipeline_result.answer,
+            sources=sources,
+            latency_ms=latency_ms
         )
-        
+
     except Exception as e:
         print(f"Error processing RAG query: {str(e)}")
         raise HTTPException(

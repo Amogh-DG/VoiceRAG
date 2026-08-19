@@ -212,6 +212,39 @@ Every chunking strategy produces JSONL with this exact schema. **Do not change f
 }
 ```
 
+## API Endpoint Design Decisions
+
+The RAG backend exposes a single primary endpoint: `POST /ask`.
+
+### Request Schema
+```json
+{
+  "query": "What is the capital of India?"
+}
+```
+
+### Response Schema
+```json
+{
+  "answer": "...",
+  "sources": [
+    {
+      "document_id": "abc",
+      "text": "...",
+      "metadata": {}
+    }
+  ],
+  "latency_ms": 142.0
+}
+```
+
+### HTTP Status Code Strategy
+1. **Input Schema Validation (HTTP 400 Bad Request)**: 
+   If the incoming request is malformed (e.g. invalid JSON) or does not contain the required `query` field, or if the `query` field is an empty string/whitespace-only, the API returns `HTTP 400 Bad Request`. This explicitly signals client integration errors.
+   
+2. **Content Policy & Guardrails Refusals (HTTP 200 OK)**:
+   If a query is rejected due to active safety checks, off-topic detection, or low-scoring/insufficient context, the API returns a structured success payload (`HTTP 200 OK`) where the `answer` field contains the refusal/error message, `sources` is empty or low-scoring sources, and `latency_ms` is populated. This prevents the frontend/eval teams from having to implement custom exception handling or special-casing HTTP non-2xx status codes for content policy violations.
+
 ---
 
 ## Running Tests

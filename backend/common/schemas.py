@@ -132,3 +132,23 @@ class LLMGenerationOutput(BaseModel):
     answer: str = Field(..., description="Factual answer or refusal message")
     grounded: bool = Field(..., description="Whether answer is grounded in provided context")
     insufficient: bool = Field(..., description="Whether context was insufficient to answer")
+
+
+class AskRequest(BaseModel):
+    """Client request schema for the POST /ask endpoint."""
+    query: str = Field(..., description="The user query text")
+
+
+class SourceDocument(BaseModel):
+    """Represents a source document chunk reference returned to the client."""
+    document_id: str = Field(..., description="The unique identifier of the source document")
+    text: str = Field(..., description="The verbatim text content of the chunk")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata associated with the source chunk")
+
+
+class AskResponse(BaseModel):
+    """Client response schema for the POST /ask endpoint."""
+    answer: str = Field(..., description="The generated answer or refusal/insufficient context message")
+    sources: List[SourceDocument] = Field(default_factory=list, description="List of source document chunks retrieved")
+    latency_ms: float = Field(..., description="End-to-end request latency in milliseconds")
+

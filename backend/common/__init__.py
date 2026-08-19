@@ -11,6 +11,9 @@ from backend.common.schemas import (
     RefusalReason,
     GuardrailCheckResult,
     AskResult,
+    AskRequest,
+    SourceDocument,
+    AskResponse,
 )
 from backend.common.interfaces import (
     IDatasetLoader,
