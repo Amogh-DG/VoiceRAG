@@ -83,6 +83,11 @@ class VectorRetriever(IRetriever):
     def __init__(self, embedder: IEmbedder, vector_db: IVectorDB):
         self.embedder = embedder
         self.vector_db = vector_db
+        self.last_timings = {
+            "embedding_ms": 0.0,
+            "vector_db_ms": 0.0,
+            "reranking_ms": 0.0
+        }
 
     def retrieve(
         self,
@@ -105,21 +110,42 @@ class VectorRetriever(IRetriever):
         """
         if not query or not query.strip():
             logger.info("Empty query provided to retrieve(), returning empty list.")
+            self.last_timings = {
+                "embedding_ms": 0.0,
+                "vector_db_ms": 0.0,
+                "reranking_ms": 0.0
+            }
             return []
 
         if top_k <= 0:
+            self.last_timings = {
+                "embedding_ms": 0.0,
+                "vector_db_ms": 0.0,
+                "reranking_ms": 0.0
+            }
             return []
 
+        import time
+
         # 1. Embed query
+        start_embed = time.perf_counter()
         query_vector = self.embedder.embed(query)
+        embed_time_ms = (time.perf_counter() - start_embed) * 1000.0
 
         # 2. Query Vector DB (fetch candidates; fetch extra if reranking is enabled)
         fetch_k = top_k * 2 if rerank else top_k
+        start_db = time.perf_counter()
         raw_chunks: List[Chunk] = self.vector_db.query(
             vector=query_vector, top_k=fetch_k, filters=filters
         )
+        db_time_ms = (time.perf_counter() - start_db) * 1000.0
 
         if not raw_chunks:
+            self.last_timings = {
+                "embedding_ms": embed_time_ms,
+                "vector_db_ms": db_time_ms,
+                "reranking_ms": 0.0
+            }
             return []
 
         # 3. Convert Chunk objects to RetrievedChunk, computing similarity score
@@ -142,7 +168,16 @@ class VectorRetriever(IRetriever):
         retrieved_list.sort(key=lambda c: c.score, reverse=True)
 
         # 4. Optional Reranking
+        rerank_time_ms = 0.0
         if rerank:
+            start_rerank = time.perf_counter()
             retrieved_list = _simple_keyword_rerank(query, retrieved_list)
+            rerank_time_ms = (time.perf_counter() - start_rerank) * 1000.0
+
+        self.last_timings = {
+            "embedding_ms": embed_time_ms,
+            "vector_db_ms": db_time_ms,
+            "reranking_ms": rerank_time_ms
+        }
 
         return retrieved_list[:top_k]
