@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rag_backend"
-version = "0.1.0"
-description = "A clean, modular RAG backend scaffolding"
+version = "0.3.0"
+description = "A clean, modular Indic Multilingual RAG backend powered by FAISS and Gemini 3.5 Flash-Lite LLM"
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
@@ -22,6 +22,8 @@ dependencies = [
     "duckdb>=1.1.0",
     "numpy>=1.24.0",
     "sentence-transformers>=2.2.0",
+    "faiss-cpu>=1.7.4",
+    "google-genai>=2.0.0",
 ]
 
 [project.optional-dependencies]
