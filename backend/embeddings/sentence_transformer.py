@@ -32,13 +32,13 @@ class SentenceTransformerEmbedder(IEmbedder):
     Concrete IEmbedder implementation using sentence-transformers.
     """
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: Optional[str] = None):
+    def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", device: Optional[str] = None):
         self.model_name = model_name
-        self.device = device
+        self.device = "cuda"
         self._model = None
 
     def _load_model(self):
-        if self._model is None:
+        if self._model is None: 
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError as exc:
