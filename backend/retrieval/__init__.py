@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from backend.common.interfaces import IVectorDB, IRetriever
 from backend.retrieval.in_memory import InMemoryVectorDB
 from backend.retrieval.retriever import VectorRetriever
+from backend.retrieval.faiss_retriever import FAISSRetriever
 from backend.embeddings import get_embedder
 
 _VECTOR_DB_REGISTRY: Dict[str, type] = {
@@ -40,6 +41,7 @@ __all__ = [
     "IRetriever",
     "InMemoryVectorDB",
     "VectorRetriever",
+    "FAISSRetriever",
     "get_vector_db",
     "get_retriever",
 ]

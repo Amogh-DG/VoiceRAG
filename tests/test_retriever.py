@@ -1,9 +1,3 @@
-"""
-tests/test_retriever.py
------------------------
-Unit and integration tests for VectorRetriever and the IRetriever public contract.
-"""
-
 import pytest
 from backend.common.schemas import Chunk, RetrievedChunk
 from backend.embeddings.mock import MockEmbedder
@@ -12,7 +6,6 @@ from backend.retrieval.retriever import VectorRetriever
 
 
 def setup_sample_retriever() -> VectorRetriever:
-    """Helper to instantiate and seed a VectorRetriever with known chunks."""
     embedder = MockEmbedder(dimension=64)
     vector_db = InMemoryVectorDB()
 
@@ -62,11 +55,11 @@ class TestVectorRetriever:
         results = retriever.retrieve(exact_text, top_k=3)
 
         assert len(results) == 3
-        # Top result should be doc2
+    
         top = results[0]
         assert top.document_id == "doc2"
         assert top.text == exact_text
-        assert top.score > 0.9  # exact text match cosine similarity ~ 1.0
+        assert top.score > 0.9  
 
     def test_empty_query_returns_empty_list(self):
         retriever = setup_sample_retriever()
