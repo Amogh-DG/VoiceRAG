@@ -18,6 +18,7 @@ Runtime Characteristics
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -51,6 +52,7 @@ class FAISSRetriever(IRetriever):
         self.metadata_path = Path(metadata_path)
         self.model_name = model_name
         self.device = device
+        self.last_timings_ms: Dict[str, float] = {}
 
         if not self.faiss_path.exists():
             raise FileNotFoundError(f"FAISS index file not found: {self.faiss_path}")
@@ -89,29 +91,30 @@ class FAISSRetriever(IRetriever):
 
     def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
-        Executes real FAISS search for a raw text query.
-
-        Returns structured dictionary objects with keys:
-          - score:          float (cosine similarity)
-          - chunk_id:       str
-          - parent_doc_id:  str
-          - text:           str (chunk content)
-          - metadata:       dict
+        Executes real FAISS search for a raw text query with sub-stage timing.
         """
         if not query or not query.strip():
             return []
 
-        # Generate query embedding & normalize
+        t_search_start = time.perf_counter()
+
+        # Sub-stage 4: Query embedding
+        t_embed_start = time.perf_counter()
         q_vec = self.embedder.embed(query)
         q_arr = np.array(q_vec, dtype=np.float32)
         norm = np.linalg.norm(q_arr)
         if norm > 0:
             q_arr = q_arr / norm
         q_matrix = q_arr.reshape(1, -1)
+        t_embed_end = time.perf_counter()
 
-        # FAISS search
+        # Sub-stage 5: FAISS search
+        t_faiss_start = time.perf_counter()
         scores, indices = self.faiss_index.search(q_matrix, top_k)
+        t_faiss_end = time.perf_counter()
 
+        # Sub-stage 6: Metadata lookup & result construction
+        t_meta_start = time.perf_counter()
         results: List[Dict[str, Any]] = []
         for score, pos_idx in zip(scores[0], indices[0]):
             if pos_idx < 0 or pos_idx >= len(self.metadata_list):
@@ -127,6 +130,16 @@ class FAISSRetriever(IRetriever):
                 "text": content,
                 "metadata": meta_payload.get("metadata", {}),
             })
+        t_meta_end = time.perf_counter()
+
+        t_search_end = time.perf_counter()
+
+        self.last_timings_ms = {
+            "query_embedding_ms": (t_embed_end - t_embed_start) * 1000.0,
+            "faiss_search_ms": (t_faiss_end - t_faiss_start) * 1000.0,
+            "metadata_lookup_ms": (t_meta_end - t_meta_start) * 1000.0,
+            "total_faiss_retriever_ms": (t_search_end - t_search_start) * 1000.0,
+        }
 
         return results
 
@@ -142,18 +155,16 @@ class FAISSRetriever(IRetriever):
         """
         search_results = self.search(query=query, top_k=top_k)
         
-        retrieved: List[RetrievedChunk] = []
-        for item in search_results:
-            retrieved.append(
-                RetrievedChunk(
-                    text=item["text"],
-                    score=item["score"],
-                    document_id=item["parent_doc_id"],
-                    metadata={
-                        "chunk_id": item["chunk_id"],
-                        **item["metadata"],
-                    },
-                )
+        return [
+            RetrievedChunk(
+                text=res["text"],
+                score=res["score"],
+                document_id=res["parent_doc_id"],
+                metadata={
+                    "chunk_id": res["chunk_id"],
+                    "similarity_score": res["score"],
+                    **res["metadata"],
+                },
             )
-
-        return retrieved
+            for res in search_results
+        ]
