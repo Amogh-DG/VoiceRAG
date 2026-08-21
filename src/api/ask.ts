@@ -30,16 +30,18 @@ export interface AskResponse {
   latency_ms?: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 15000; // 15 seconds
+const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
 
 function getBaseUrl(): string {
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, '');
+    const envUrl = import.meta.env.VITE_API_BASE_URL.trim();
+    if (envUrl) return envUrl.replace(/\/+$/, '');
   }
   if (typeof process !== 'undefined' && process.env?.VITE_API_BASE_URL) {
-    return process.env.VITE_API_BASE_URL.replace(/\/+$/, '');
+    const envUrl = process.env.VITE_API_BASE_URL.trim();
+    if (envUrl) return envUrl.replace(/\/+$/, '');
   }
-  return '';
+  return 'http://localhost:8000';
 }
 
 async function extractErrorDetails(response: Response): Promise<string> {
@@ -72,7 +74,7 @@ async function extractErrorDetails(response: Response): Promise<string> {
  * The frontend never communicates with vector DB, embedding model, or LLM directly.
  *
  * @param query - User question string
- * @param timeoutMs - Request timeout in milliseconds (defaults to 15,000ms)
+ * @param timeoutMs - Request timeout in milliseconds (defaults to 30,000ms)
  * @returns Promise<AskResponse> containing answer, sources, and optional latency_ms
  * @throws {AskError} on network failure, timeout, non-2xx response, or invalid payload
  */

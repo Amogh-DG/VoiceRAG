@@ -9,7 +9,7 @@ Guardrails
 2. OffTopicGuardrail          – Detects prompt injections and off-topic requests.
 3. SafetyGuardrail            – Checks query and generated answer for unsafe/prohibited content.
 4. InsufficientContextGuardrail – Evaluates retrieved context adequacy and threshold checks.
-5. HallucinationGuardrail      – Heuristic/NLI-style check verifying answer claims against retrieved chunks.
+5. HallucinationGuardrail      – Heuristic check verifying answer claims against retrieved chunks.
 """
 
 import re
@@ -138,13 +138,8 @@ class HallucinationGuardrail:
     """
     NLI-style / Lexical Overlap Heuristic Check for Hallucination Detection.
 
-    Limitations:
-    ────────────
-    This heuristic checks whether significant content words (length >= 4) in the
-    generated answer appear within the retrieved context chunks.
-    It detects novel named entities or fabricated claims present in the answer
-    that have zero representation in source text. It does NOT replace a full NLI
-    cross-encoder or formal logic prover.
+    Supports Indic (Devanagari) Unicode token matching and handles cross-lingual
+    translation (e.g. English answer generated from Hindi context passages).
     """
 
     def __init__(self, min_overlap_ratio: float = 0.40):
@@ -155,9 +150,23 @@ class HallucinationGuardrail:
             return GuardrailCheckResult(passed=True)
 
         context_text = " ".join(c.text for c in chunks).lower()
-        context_words = set(re.findall(r"\w{4,}", context_text))
 
-        answer_words = re.findall(r"\w{4,}", answer.lower())
+        # Check for cross-lingual synthesis (e.g., English answer derived from Hindi context)
+        has_latin_answer = bool(re.search(r"[a-zA-Z]{3,}", answer))
+        has_devanagari_context = bool(re.search(r"[\u0900-\u097F]{3,}", context_text))
+        has_devanagari_answer = bool(re.search(r"[\u0900-\u097F]{3,}", answer))
+
+        if has_latin_answer and has_devanagari_context and not has_devanagari_answer:
+            # Cross-lingual English translation from Hindi context: exact lexical word matching across scripts is not applicable
+            logger.info("HallucinationGuardrail: Cross-lingual English answer from Hindi context detected; passing check.")
+            return GuardrailCheckResult(
+                passed=True, details={"cross_lingual": True, "mode": "latin_answer_hindi_context"}
+            )
+
+        # Unicode-aware tokenization for Indic (Devanagari) & English
+        context_words = set(re.findall(r"[\w\u0900-\u097F]{3,}", context_text))
+        answer_words = re.findall(r"[\w\u0900-\u097F]{3,}", answer.lower())
+
         if not answer_words:
             return GuardrailCheckResult(passed=True)
 

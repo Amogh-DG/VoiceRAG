@@ -14,13 +14,17 @@ from backend.generation.llm_client import ILLMClient, MockLLMClient
 
 logger = logging.getLogger(__name__)
 
-# Default system prompt enforcing strict grounding in retrieved context
+# Default system prompt enforcing strict grounding in retrieved context AND language matching
 DEFAULT_SYSTEM_PROMPT = (
     "You are a factual Retrieval-Augmented Generation (RAG) assistant.\n"
     "Your primary duty is to answer the user's question strictly using only the provided context passages.\n"
     "Do NOT use outside knowledge, speculate, or fabricate answers.\n"
+    "CRITICAL LANGUAGE RULE:\n"
+    "You MUST respond in the EXACT SAME language as the user's question.\n"
+    "- If the user asks in English, write your answer entirely in clear English (translating retrieved facts accurately if the context passages are in Hindi).\n"
+    "- If the user asks in Hindi, write your answer entirely in Hindi.\n"
     "If the provided context does not contain sufficient facts to answer the question, or if the context is irrelevant, "
-    "set 'insufficient': true, 'grounded': false, and state clearly in 'answer' that the context is insufficient."
+    "set 'insufficient': true, 'grounded': false, and state clearly in 'answer' (in the user's question language) that the context is insufficient."
 )
 
 
@@ -39,7 +43,7 @@ def _to_retrieved_chunk(chunk: Union[RetrievedChunk, Chunk]) -> RetrievedChunk:
 
 class RAGGenerator(IGenerator):
     """
-    RAG Generator component enforcing grounding and insufficient-information refusal policies.
+    RAG Generator component enforcing grounding, refusal policies, and query language matching.
 
     Args:
         llm_client:      Client for structured LLM completions (defaults to MockLLMClient).
@@ -60,7 +64,7 @@ class RAGGenerator(IGenerator):
     def _build_user_prompt(
         self, question: str, chunks: List[RetrievedChunk]
     ) -> str:
-        """Formats question and context passages with chunk citations."""
+        """Formats question and context passages with chunk citations and language instructions."""
         context_blocks = []
         for idx, chunk in enumerate(chunks, 1):
             doc_id = chunk.document_id
@@ -71,9 +75,12 @@ class RAGGenerator(IGenerator):
 
         context_str = "\n\n".join(context_blocks)
         return (
-            f"Question: {question}\n\n"
+            f"User Question: {question}\n\n"
             f"Context Passages:\n{context_str}\n\n"
-            f"Provide a structured response with 'answer', 'grounded', and 'insufficient'."
+            f"Instructions:\n"
+            f"1. Answer the User Question strictly using only facts present in the Context Passages.\n"
+            f"2. IMPORTANT: Write your response in the SAME LANGUAGE as the User Question (English question -> English answer, Hindi question -> Hindi answer).\n"
+            f"3. Provide a structured response with 'answer', 'grounded', and 'insufficient'."
         )
 
     def generate(
