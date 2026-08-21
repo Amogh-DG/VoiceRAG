@@ -1,0 +1,82 @@
+# Speech-to-Text (STT) Module
+ 
+This module handles speech-to-text transcription by calling the live **Sarvam AI** REST API (`saaras:v3`). All provider-specific API details, networking, error handling, and authentication are isolated within this module.
+ 
+## Sarvam REST API Contract
+ 
+- **Endpoint**: `POST https://api.sarvam.ai/speech-to-text`
+- **Authentication**: `api-subscription-key: <VITE_SARVAM_API_KEY>` header (this exact header name, not Bearer token)
+- **Request Format (`multipart/form-data`)**:
+-   - `file` *(required)*: The audio binary blob / file (e.g. `audio/webm` from `MediaRecorder`).
+-   - `model` *(optional)*: `"saaras:v3"`
+-   - `language_code` *(optional)*: `"unknown"` for automatic language detection.
+-   - `with_timestamps` *(optional)*: `"false"`
+- - **Response Format (200 OK)**:
+-   ```json
+-   {
+-     "request_id": "...",
+-     "transcript": "...",
+-     "language_code": "..."
+-   }
+-   ```
+- 
+- > [!IMPORTANT]
+- > **Audio Duration Limitation**: The Sarvam REST speech-to-text endpoint caps audio recordings at a maximum of **30 seconds**. Audio exceeding this limit will result in an error from the API.
+- 
+- ---
+- 
+- ## Setup Instructions
+- 
+- ### 1. Obtain a Sarvam AI API Key
+- 1. Visit the [Sarvam AI Dashboard](https://dashboard.sarvam.ai/).
+- 2. Sign up or log in to your account.
+- 3. Navigate to the **API Keys** section and copy or create a new API subscription key.
+- 
+- ### 2. Configure Environment Variable
+- In your `frontend/` directory, create or edit your `.env` file (you can copy from `.env.example`):
+- 
+- ```bash
+- cp .env.example .env
+- ```
+- 
+- Set the key:
+- 
+- ```env
+- VITE_SARVAM_API_KEY=your_sarvam_api_key_here
+- ```
+- 
+- > **Note**: Vite exposes environment variables prefixed with `VITE_` to client code via `import.meta.env.VITE_SARVAM_API_KEY`.
+- 
+- ---
+- 
+- ## Usage
+- 
+- ```typescript
+- import { transcribe, SttError } from './stt';
+- 
+- try {
+-   const audioBlob: Blob = ...; // from MediaRecorder (audio/webm)
+-   const transcript: string = await transcribe(audioBlob);
+-   console.log('Transcribed text:', transcript);
+- } catch (error) {
+-   if (error instanceof SttError) {
+-     console.error(`STT Error [${error.code}] (Status ${error.statusCode}):`, error.message);
+-   } else {
+-     console.error('Unexpected error:', error);
+-   }
+- }
+- ```
+- 
+- ### Guarantees & Error Mapping
+- - **Return Value**: Returns ONLY the `transcript` as a plain string.
+- - **Empty / Silent Audio**: Returns `""` (empty string) cleanly without throwing.
+- - **Typed Errors (`SttError`)**:
+-   - `400`: `BAD_REQUEST` - Bad request (invalid audio format or parameters).
+-   - `403` / `401`: `FORBIDDEN` - Forbidden (invalid or missing API key).
+-   - `422`: `UNPROCESSABLE_ENTITY` - Unprocessable entity (audio cannot be processed).
+-   - `429`: `RATE_LIMITED` - Rate limit exceeded.
+-   - `500` / `503`: `SERVER_ERROR` - Server error / service unavailable.
+-   - Missing Key: `MISSING_API_KEY`
+-   - Network Failure: `NETWORK_ERROR`
+- - **Isolation**: Strictly performs STT. Never calls any `/ask` or RAG pipeline internally.
+
