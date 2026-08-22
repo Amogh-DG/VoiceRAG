@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 
+from pydantic import BaseModel
 from backend.common.schemas import AskRequest, AskResponse, SourceDocument
 from backend.retrieval.faiss_retriever import FAISSRetriever
 from backend.generation.llm_client import GeminiLLMClient, MockLLMClient
@@ -178,3 +179,66 @@ async def ask_question_stream(request: AskRequest):
         yield f"event: done\ndata: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+class TranslateRequest(BaseModel):
+    text: str
+    target_lang: str
+
+
+class TranslateResponse(BaseModel):
+    translated_text: str
+
+
+@app.post(
+    "/translate",
+    response_model=TranslateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Translate text to a target language",
+    description="Translates the provided text into a target language using deep-translator (GoogleTranslator).",
+)
+async def translate_text(request: TranslateRequest):
+    """Translates the provided text using deep-translator (GoogleTranslator). Fast, free, no LLM needed."""
+    if not request.text or not request.text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Text to translate cannot be empty or whitespace-only.",
+        )
+    if not request.target_lang or not request.target_lang.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target language cannot be empty or whitespace-only.",
+        )
+
+    # Map human-readable language names to ISO 639-1 codes expected by GoogleTranslator
+    LANG_NAME_TO_CODE = {
+        "english": "en",
+        "hindi": "hi",
+        "bengali": "bn",
+        "tamil": "ta",
+        "telugu": "te",
+        "marathi": "mr",
+        "gujarati": "gu",
+        "kannada": "kn",
+        "malayalam": "ml",
+        "punjabi": "pa",
+        "urdu": "ur",
+    }
+
+    lang_key = request.target_lang.strip().lower()
+    target_code = LANG_NAME_TO_CODE.get(lang_key, lang_key)  # fall back to raw value if already a code
+
+    try:
+        from deep_translator import GoogleTranslator
+
+        def _translate():
+            return GoogleTranslator(source="auto", target=target_code).translate(request.text)
+
+        translated = await asyncio.to_thread(_translate)
+        return TranslateResponse(translated_text=translated)
+    except Exception as e:
+        print(f"Error in translation endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while translating: {str(e)}",
+        )

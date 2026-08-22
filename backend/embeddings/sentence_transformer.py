@@ -34,8 +34,25 @@ class SentenceTransformerEmbedder(IEmbedder):
 
     def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", device: Optional[str] = None):
         self.model_name = model_name
-        self.device = "cuda"
+        
+        target_device = device if device is not None else "cuda"
+        
+        try:
+            import torch
+            if target_device == "cuda" and not torch.cuda.is_available():
+                logger.warning("CUDA is requested/configured, but torch.cuda.is_available() is False. Falling back to CPU.")
+                self.device = "cpu"
+            else:
+                self.device = target_device
+        except ImportError:
+            logger.warning("torch package not found. Defaulting device to CPU.")
+            self.device = "cpu"
+            
         self._model = None
+        # Eager-load the model at construction time so the first user query
+        # does not pay the cold-start penalty.
+        self._load_model()
+        self._warmup()
 
     def _load_model(self):
         if self._model is None: 
@@ -49,6 +66,30 @@ class SentenceTransformerEmbedder(IEmbedder):
             
             logger.info("Loading SentenceTransformer model '%s'...", self.model_name)
             self._model = SentenceTransformer(self.model_name, device=self.device)
+            
+            # Apply dynamic quantization to torch.nn.Linear layers, dtype=torch.qint8
+            # Note: PyTorch dynamic quantization is only supported on CPU.
+            if self.device == "cpu":
+                logger.info("Applying dynamic quantization (qint8) to SentenceTransformer on CPU...")
+                import torch
+                self._model = torch.quantization.quantize_dynamic(
+                    self._model, {torch.nn.Linear}, dtype=torch.qint8
+                )
+            else:
+                logger.warning(
+                    "Dynamic quantization (qint8) is only supported on CPU in PyTorch. "
+                    "Skipping quantization for model on device '%s' to avoid backend operator mismatch.",
+                    self.device
+                )
+
+    def _warmup(self):
+        """Run a no-op encode to pre-compile CUDA kernels and warm up the model."""
+        try:
+            logger.info("Running model warmup encode...")
+            self._model.encode("warmup", convert_to_numpy=True, normalize_embeddings=True)
+            logger.info("Model warmup complete.")
+        except Exception as exc:
+            logger.warning("Model warmup failed (non-fatal): %s", exc)
 
     def embed(self, text: str) -> List[float]:
         """Generates embedding vector for a single text."""

@@ -5,7 +5,7 @@ import { AnswerView } from './AnswerView';
 import { SourcesList } from './SourcesList';
 import { ErrorBanner, type ErrorState, type ErrorType } from './ErrorBanner';
 import { transcribe, SttError } from '../stt';
-import { askQuestion, AskError, type AskSource } from '../api';
+import { askQuestion, AskError, type AskSource, translateText } from '../api';
 
 export type QAStatus = 'idle' | 'recording' | 'transcribing' | 'asking' | 'done' | 'error';
 
@@ -21,6 +21,13 @@ export const VoiceQA: React.FC = () => {
   // Cached data to allow smart retry of individual failed steps
   const [savedAudioBlob, setSavedAudioBlob] = useState<Blob | null>(null);
   const [savedTranscript, setSavedTranscript] = useState<string>('');
+
+  // Direct typing and translation states
+  const [textQuery, setTextQuery] = useState<string>('');
+  const [translatedAnswer, setTranslatedAnswer] = useState<string>('');
+  const [selectedLang, setSelectedLang] = useState<string>('English');
+  const [isTranslating, setIsTranslating] = useState<boolean>(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -64,6 +71,9 @@ export const VoiceQA: React.FC = () => {
     setRecordingDuration(0);
     setSavedAudioBlob(null);
     setSavedTranscript('');
+    setTextQuery('');
+    setTranslatedAnswer('');
+    setTranslationError(null);
   };
 
   /**
@@ -72,6 +82,8 @@ export const VoiceQA: React.FC = () => {
   const executeAsk = useCallback(async (queryText: string) => {
     setStatus('asking');
     setError(null);
+    setTranslatedAnswer('');
+    setTranslationError(null);
 
     try {
       const response = await askQuestion(queryText);
@@ -138,6 +150,29 @@ export const VoiceQA: React.FC = () => {
       }
     }
   }, [executeAsk]);
+
+  const handleTextSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!textQuery.trim() || isProcessing) return;
+    setTranscript(textQuery);
+    setSavedTranscript(textQuery);
+    executeAsk(textQuery);
+    setTextQuery('');
+  };
+
+  const handleTranslate = async () => {
+    if (!answer || isTranslating) return;
+    setIsTranslating(true);
+    setTranslationError(null);
+    try {
+      const response = await translateText(answer, selectedLang);
+      setTranslatedAnswer(response.translated_text);
+    } catch (err: unknown) {
+      setTranslationError(err instanceof Error ? err.message : 'Translation failed.');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
 
   /**
    * Start audio recording with browser MediaRecorder API
@@ -305,6 +340,29 @@ export const VoiceQA: React.FC = () => {
           disabled={isProcessing}
         />
 
+        <div className="text-query-container">
+          <div className="or-divider">
+            <span>OR</span>
+          </div>
+          <form onSubmit={handleTextSubmit} className="text-query-form">
+            <input
+              type="text"
+              value={textQuery}
+              onChange={(e) => setTextQuery(e.target.value)}
+              placeholder="Or type your question directly here..."
+              disabled={isProcessing}
+              className="text-query-input"
+            />
+            <button
+              type="submit"
+              disabled={isProcessing || !textQuery.trim()}
+              className="text-query-submit-btn"
+            >
+              Ask
+            </button>
+          </form>
+        </div>
+
         {/* Error notification & Smart Retry */}
         <ErrorBanner
           error={error}
@@ -322,10 +380,64 @@ export const VoiceQA: React.FC = () => {
           />
 
           <AnswerView
-            answer={answer}
+            answer={translatedAnswer || answer}
             latencyMs={latencyMs}
             isAsking={isAsking}
           />
+
+          {answer && status === 'done' && !isAsking && (
+            <div className="translation-control-card">
+              <div className="translation-form-row">
+                <label htmlFor="lang-select">Translate answer to:</label>
+                <select
+                  id="lang-select"
+                  value={selectedLang}
+                  onChange={(e) => setSelectedLang(e.target.value)}
+                  disabled={isTranslating}
+                  className="lang-select-dropdown"
+                >
+                  <option value="English">English</option>
+                  <option value="Hindi">Hindi (हिन्दी)</option>
+                  <option value="Bengali">Bengali (বাংলা)</option>
+                  <option value="Tamil">Tamil (தமிழ்)</option>
+                  <option value="Telugu">Telugu (తెలుగు)</option>
+                  <option value="Marathi">Marathi (मराठी)</option>
+                  <option value="Gujarati">Gujarati (ગુજરાતી)</option>
+                  <option value="Kannada">Kannada (ಕನ್ನಡ)</option>
+                  <option value="Malayalam">Malayalam (മലയാളം)</option>
+                  <option value="Punjabi">Punjabi (ਪੰਜਾਬী)</option>
+                  <option value="Urdu">Urdu (اردو)</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleTranslate}
+                  disabled={isTranslating}
+                  className="btn-translate-action"
+                >
+                  {isTranslating ? 'Translating...' : 'Translate'}
+                </button>
+                {translatedAnswer && (
+                  <button
+                    type="button"
+                    onClick={() => setTranslatedAnswer('')}
+                    className="btn-show-original"
+                  >
+                    Show Original
+                  </button>
+                )}
+              </div>
+              {translationError && (
+                <div className="translation-error-msg">
+                  ⚠️ {translationError}
+                </div>
+              )}
+              {translatedAnswer && (
+                <div className="translation-success-indicator">
+                  Showing translation in {selectedLang}
+                </div>
+              )}
+            </div>
+          )}
 
           <SourcesList sources={sources} />
         </div>

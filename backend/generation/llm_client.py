@@ -35,6 +35,13 @@ class ILLMClient(ABC):
         """
         pass
 
+    @abstractmethod
+    def translate(self, text: str, target_lang: str) -> str:
+        """
+        Translates the provided text into the target language.
+        """
+        pass
+
     def complete_structured_stream(
         self, system_prompt: str, user_prompt: str
     ) -> Generator[str, None, LLMGenerationOutput]:
@@ -84,6 +91,10 @@ class MockLLMClient(ILLMClient):
             grounded=True,
             insufficient=False,
         )
+
+    def translate(self, text: str, target_lang: str) -> str:
+        """Simulates translation for offline testing."""
+        return f"[Translated to {target_lang}]: {text}"
 
 
 class GeminiLLMClient(ILLMClient):
@@ -229,3 +240,79 @@ class GeminiLLMClient(ILLMClient):
                 grounded=False,
                 insufficient=True,
             )
+
+    def translate(self, text: str, target_lang: str) -> str:
+        """Translates the given text into the target language using Gemini."""
+        if not self.api_key:
+            logger.warning("GEMINI_API_KEY missing during translation request. Returning untranslated text.")
+            return f"[API Key Missing] {text}"
+
+        system_prompt = (
+            "You are a professional, high-fidelity translator.\n"
+            "Translate the input text precisely into the requested target language.\n"
+            "Maintain the original meaning, tone, and formatting.\n"
+            "Return ONLY the translated text, with no preamble, explanations, or quotes."
+        )
+        user_prompt = f"Translate the following text to target language '{target_lang}':\n\n{text}"
+
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=self.api_key)
+            config = types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.3,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            )
+            response = client.models.generate_content(
+                model=self.model_name,
+                contents=user_prompt,
+                config=config,
+            )
+            if response.text:
+                return response.text.strip()
+        except ImportError:
+            logger.debug("google-genai SDK not imported; using REST API fallback.")
+        except Exception as exc:
+            logger.warning("SDK translation failed: %s. Using REST API fallback.", exc)
+
+        return self._translate_via_rest_api(system_prompt, user_prompt)
+
+    def _translate_via_rest_api(self, system_prompt: str, user_prompt: str) -> str:
+        """Direct HTTP REST API call to Google Gemini endpoint for translation."""
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+        )
+        payload = {
+            "system_instruction": {
+                "parts": [{"text": system_prompt}]
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_prompt}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.3
+            }
+        }
+        headers = {"Content-Type": "application/json"}
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as response:
+                res_body = json.loads(response.read().decode("utf-8"))
+                candidates = res_body.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "").strip()
+        except Exception as exc:
+            logger.error("REST API translation failed: %s", exc)
+        return "[Translation failed due to API error]"

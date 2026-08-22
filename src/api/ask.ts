@@ -147,3 +147,85 @@ export async function askQuestion(query: string, timeoutMs = DEFAULT_TIMEOUT_MS)
     ...(typeof res.latency_ms === 'number' ? { latency_ms: res.latency_ms } : {}),
   };
 }
+
+export interface TranslateResponse {
+  translated_text: string;
+}
+
+/**
+ * Sends text to the backend /translate endpoint.
+ *
+ * @param text - Text content to translate
+ * @param targetLang - Target language name (e.g. 'English', 'Hindi')
+ * @returns Promise<TranslateResponse> containing translated_text
+ */
+export async function translateText(text: string, targetLang: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<TranslateResponse> {
+  if (!text || text.trim() === '') {
+    throw new AskError('Text to translate must not be empty.', 'INVALID_TEXT');
+  }
+  if (!targetLang || targetLang.trim() === '') {
+    throw new AskError('Target language must not be empty.', 'INVALID_LANG');
+  }
+
+  const baseUrl = getBaseUrl();
+  const endpoint = `${baseUrl}/translate`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`Request timed out after ${timeoutMs / 1000}s`));
+  }, timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text: text.trim(), target_lang: targetLang.trim() }),
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    if (controller.signal.aborted) {
+      throw new AskError(
+        `Request to /translate timed out after ${timeoutMs / 1000} seconds.`,
+        'TIMEOUT_ERROR',
+        undefined,
+        err
+      );
+    }
+    throw new AskError(
+      `Network failure connecting to /translate: ${err instanceof Error ? err.message : String(err)}`,
+      'NETWORK_ERROR',
+      undefined,
+      err
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    const errorDetails = await extractErrorDetails(response);
+    const message = errorDetails
+      ? `Translation request failed (${response.status}): ${errorDetails}`
+      : `Translation request failed with status ${response.status}`;
+
+    throw new AskError(message, 'API_ERROR', response.status);
+  }
+
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch (err) {
+    throw new AskError('Failed to parse JSON response from /translate.', 'INVALID_RESPONSE', response.status, err);
+  }
+
+  const res = data as TranslateResponse;
+  if (!res || typeof res.translated_text !== 'string') {
+    throw new AskError('Invalid response structure: missing translated_text.', 'INVALID_RESPONSE_STRUCTURE', response.status);
+  }
+
+  return {
+    translated_text: res.translated_text,
+  };
+}
