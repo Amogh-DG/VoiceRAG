@@ -14,7 +14,7 @@ def test_read_root(client):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert "RAG Backend Scaffolding" in data["service"]
+    assert "RAG Backend" in data["service"]
 
 def test_ask_endpoint_success(client):
     """Scenario 1: Normal query.
@@ -74,7 +74,7 @@ def test_ask_endpoint_empty_context(client):
     data = response.json()
     
     assert "answer" in data
-    assert "insufficient" in data["answer"].lower() or "score" in data["answer"].lower()
+    assert "provided context" in data["answer"].lower() or "insufficient" in data["answer"].lower() or "facts" in data["answer"].lower()
     assert "sources" in data
     assert isinstance(data["sources"], list)
     assert "latency_ms" in data

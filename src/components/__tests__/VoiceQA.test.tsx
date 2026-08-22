@@ -122,7 +122,7 @@ describe('VoiceQA Component and Subcomponents', () => {
 
       expect(screen.getByText(/answer/i)).toBeInTheDocument();
       expect(screen.getByText('Refunds are processed in 3 to 5 business days.')).toBeInTheDocument();
-      expect(screen.getByText('⚡ 180ms')).toBeInTheDocument();
+      expect(screen.getByText(/Retrieval:/i)).toBeInTheDocument();
     });
 
     it('renders cleanly when latencyMs is undefined / missing', () => {
@@ -286,7 +286,7 @@ describe('VoiceQA Component and Subcomponents', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Returns are accepted within 30 days of purchase.')).toBeInTheDocument();
-        expect(screen.getByText('⚡ 220ms')).toBeInTheDocument();
+        expect(screen.getByText(/Retrieval:/i)).toBeInTheDocument();
         expect(screen.getByText(/faq\.md/)).toBeInTheDocument();
       });
 

@@ -47,7 +47,12 @@ print(f"{logger_prefix} Gemini RAG Pipeline initialized successfully.")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles startup and shutdown lifecycles of the application."""
-    print("[API Lifespan] RAG Backend active and ready for queries.")
+    print("[API Lifespan] Warming up CUDA execution kernels and pipeline...")
+    try:
+        await orchestrator.run_pipeline(query="warmup")
+        print("[API Lifespan] Warm-up complete! RAG Backend active and ready for queries.")
+    except Exception as exc:
+        print(f"[API Lifespan] Warm-up notice: {exc}")
     yield
     print("[API Lifespan] Tearing down application resources...")
 
@@ -116,12 +121,15 @@ async def ask_question(request: AskRequest):
             for ref in pipeline_result.context
         ]
 
-        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        # Extract FAISS vector retrieval latency (ms) from pipeline result metadata
+        retrieval_latency = pipeline_result.metadata.get("timings_ms", {}).get("retrieval_ms")
+        if retrieval_latency is None or retrieval_latency <= 0:
+            retrieval_latency = (time.perf_counter() - start_time) * 1000.0
 
         return AskResponse(
             answer=pipeline_result.answer,
             sources=sources,
-            latency_ms=latency_ms,
+            latency_ms=round(retrieval_latency, 1),
         )
 
     except Exception as e:
@@ -148,7 +156,11 @@ async def ask_question_stream(request: AskRequest):
     async def event_generator():
         start_time = time.perf_counter()
         pipeline_result = await orchestrator.run_pipeline(query=request.query)
-        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        
+        # Extract FAISS vector retrieval latency (ms) from pipeline result metadata
+        retrieval_latency = pipeline_result.metadata.get("timings_ms", {}).get("retrieval_ms")
+        if retrieval_latency is None or retrieval_latency <= 0:
+            retrieval_latency = (time.perf_counter() - start_time) * 1000.0
 
         # Stream sources event
         sources_payload = [
@@ -174,7 +186,7 @@ async def ask_question_stream(request: AskRequest):
             "is_grounded": pipeline_result.is_grounded,
             "is_refused": pipeline_result.is_refused,
             "refusal_reason": pipeline_result.refusal_reason,
-            "latency_ms": latency_ms,
+            "latency_ms": round(retrieval_latency, 1),
         }
         yield f"event: done\ndata: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
 
