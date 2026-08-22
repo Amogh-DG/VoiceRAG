@@ -34,7 +34,20 @@ class SentenceTransformerEmbedder(IEmbedder):
 
     def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", device: Optional[str] = None):
         self.model_name = model_name
-        self.device = "cuda"
+        
+        target_device = device if device is not None else "cuda"
+        
+        try:
+            import torch
+            if target_device == "cuda" and not torch.cuda.is_available():
+                logger.warning("CUDA is requested/configured, but torch.cuda.is_available() is False. Falling back to CPU.")
+                self.device = "cpu"
+            else:
+                self.device = target_device
+        except ImportError:
+            logger.warning("torch package not found. Defaulting device to CPU.")
+            self.device = "cpu"
+            
         self._model = None
 
     def _load_model(self):
