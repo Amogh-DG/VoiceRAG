@@ -717,3 +717,197 @@
     justify-content: space-between;
   }
 }
+
+/* Direct Typing Question styles */
+.text-query-container {
+  margin-top: 1.5rem;
+  width: 100%;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.or-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 1.25rem 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.or-divider::before,
+.or-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.or-divider:not(:empty)::before {
+  margin-right: .75em;
+}
+
+.or-divider:not(:empty)::after {
+  margin-left: .75em;
+}
+
+.text-query-form {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  padding: 0.4rem;
+  border-radius: 30px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.text-query-form:focus-within {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
+}
+
+.text-query-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.text-query-input::placeholder {
+  color: var(--text-muted);
+}
+
+.text-query-submit-btn {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: white;
+  border: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.6rem 1.4rem;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.text-query-submit-btn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: scale(1.02);
+}
+
+.text-query-submit-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.text-query-submit-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Translation card styles */
+.translation-control-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-top: 1rem;
+  margin-bottom: 1.5rem;
+  backdrop-filter: blur(8px);
+}
+
+.translation-form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.translation-form-row label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.lang-select-dropdown {
+  padding: 0.45rem 1.75rem 0.45rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: rgba(11, 15, 25, 0.8) url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e") no-repeat right 0.5rem center/1.25rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  outline: none;
+  min-width: 130px;
+}
+
+.lang-select-dropdown:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.btn-translate-action {
+  padding: 0.45rem 1.25rem;
+  border-radius: 8px;
+  border: 1px solid #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  color: #a5b4fc;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.btn-translate-action:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-translate-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-show-original {
+  padding: 0.45rem 1.25rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.btn-show-original:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.translation-error-msg {
+  color: #f87171;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.translation-success-indicator {
+  color: #34d399;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}

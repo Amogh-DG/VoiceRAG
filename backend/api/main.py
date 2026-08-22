@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 
+from pydantic import BaseModel
 from backend.common.schemas import AskRequest, AskResponse, SourceDocument
 from backend.retrieval.faiss_retriever import FAISSRetriever
 from backend.generation.llm_client import GeminiLLMClient, MockLLMClient
@@ -178,3 +179,47 @@ async def ask_question_stream(request: AskRequest):
         yield f"event: done\ndata: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+class TranslateRequest(BaseModel):
+    text: str
+    target_lang: str
+
+
+class TranslateResponse(BaseModel):
+    translated_text: str
+
+
+@app.post(
+    "/translate",
+    response_model=TranslateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Translate text to a target language",
+    description="Translates the provided text into a target language using the active LLM client.",
+)
+async def translate_text(request: TranslateRequest):
+    """Translates the provided text using the active LLM client."""
+    if not request.text or not request.text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Text to translate cannot be empty or whitespace-only.",
+        )
+    if not request.target_lang or not request.target_lang.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target language cannot be empty or whitespace-only.",
+        )
+
+    try:
+        translated = await asyncio.to_thread(
+            llm_client.translate,
+            text=request.text,
+            target_lang=request.target_lang,
+        )
+        return TranslateResponse(translated_text=translated)
+    except Exception as e:
+        print(f"Error in translation endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while translating: {str(e)}",
+        )

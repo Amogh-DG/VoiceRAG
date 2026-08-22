@@ -62,6 +62,21 @@ class SentenceTransformerEmbedder(IEmbedder):
             
             logger.info("Loading SentenceTransformer model '%s'...", self.model_name)
             self._model = SentenceTransformer(self.model_name, device=self.device)
+            
+            # Apply dynamic quantization to torch.nn.Linear layers, dtype=torch.qint8
+            # Note: PyTorch dynamic quantization is only supported on CPU.
+            if self.device == "cpu":
+                logger.info("Applying dynamic quantization (qint8) to SentenceTransformer on CPU...")
+                import torch
+                self._model = torch.quantization.quantize_dynamic(
+                    self._model, {torch.nn.Linear}, dtype=torch.qint8
+                )
+            else:
+                logger.warning(
+                    "Dynamic quantization (qint8) is only supported on CPU in PyTorch. "
+                    "Skipping quantization for model on device '%s' to avoid backend operator mismatch.",
+                    self.device
+                )
 
     def embed(self, text: str) -> List[float]:
         """Generates embedding vector for a single text."""
