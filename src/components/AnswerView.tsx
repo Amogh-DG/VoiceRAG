@@ -23,8 +23,8 @@ export const AnswerView: React.FC<AnswerViewProps> = ({
           <h3>Answer</h3>
         </div>
         {typeof latencyMs === 'number' && (
-          <span className="badge badge-latency" title={`FAISS Vector Retrieval Latency: ${latencyMs}ms`}>
-            ⚡ Retrieval: {latencyMs}ms
+          <span className="badge badge-latency" title={`Server latency: ${latencyMs}ms`}>
+            ⚡ {latencyMs}ms
           </span>
         )}
       </div>
