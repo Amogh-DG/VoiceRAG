@@ -49,6 +49,10 @@ class SentenceTransformerEmbedder(IEmbedder):
             self.device = "cpu"
             
         self._model = None
+        # Eager-load the model at construction time so the first user query
+        # does not pay the cold-start penalty.
+        self._load_model()
+        self._warmup()
 
     def _load_model(self):
         if self._model is None: 
@@ -77,6 +81,15 @@ class SentenceTransformerEmbedder(IEmbedder):
                     "Skipping quantization for model on device '%s' to avoid backend operator mismatch.",
                     self.device
                 )
+
+    def _warmup(self):
+        """Run a no-op encode to pre-compile CUDA kernels and warm up the model."""
+        try:
+            logger.info("Running model warmup encode...")
+            self._model.encode("warmup", convert_to_numpy=True, normalize_embeddings=True)
+            logger.info("Model warmup complete.")
+        except Exception as exc:
+            logger.warning("Model warmup failed (non-fatal): %s", exc)
 
     def embed(self, text: str) -> List[float]:
         """Generates embedding vector for a single text."""

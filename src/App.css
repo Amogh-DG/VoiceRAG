@@ -597,6 +597,50 @@
 }
 
 /* Sources List */
+.sources-toggle-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+}
+
+.sources-toggle-header:hover .header-title-group h3 {
+  color: var(--text-primary);
+}
+
+.sources-chevron {
+  color: var(--text-muted);
+  transition: transform 0.25s ease;
+  flex-shrink: 0;
+}
+
+.sources-chevron--open {
+  transform: rotate(180deg);
+}
+
+.sources-collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s ease;
+  overflow: hidden;
+}
+
+.sources-collapsible--open {
+  grid-template-rows: 1fr;
+}
+
+.sources-collapsible > .sources-grid {
+  overflow: hidden;
+  padding-top: 1rem;
+  min-height: 0;
+}
+
 .sources-grid {
   display: flex;
   flex-direction: column;
