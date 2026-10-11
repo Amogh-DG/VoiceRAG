@@ -1,256 +1,177 @@
-# RAG Backend Scaffolding
+# VoiceRAG
 
-This project forms the backend layer for a Retrieval-Augmented Generation (RAG) system built around the [AI4Bharat MSMARCO-XI](https://huggingface.co/datasets/ai4bharat/MSMARCO-XI) dataset — the original MS MARCO QA dataset translated into 14 Indic languages.
+**Ask questions out loud in your own language and get answers grounded in real sources.**
 
-The backend exposes a FastAPI API for querying the system and uses swappable interfaces for dataset ingestion, document chunking, embedding generation, vector DB storage/retrieval, generation, and orchestration.
+VoiceRAG is a voice-first, multilingual question-answering system for Indian languages. You speak a question, it is transcribed, relevant passages are retrieved from a vector index, and an LLM answers using only those passages, with citations. When the evidence is weak, it says so instead of guessing.
 
-## Project Structure
-
-- `backend/`
-  - `api/`         – FastAPI server (`POST /ask`, `GET /`)
-  - `common/`      – Stable interfaces (ABCs) + shared Pydantic schemas
-  - `ingestion/`   – Dataset loading, normalisation (`MSMarcoXILoader`)
-  - `chunking/`    – Three chunking strategies + `get_chunker()` factory
-  - `embeddings/`  – Embedding model wrappers
-  - `retrieval/`   – Vector DB integrations
-  - `generation/`  – LLM invocation, grounding, refusal
-  - `harness/`     – Pipeline orchestration
-  - `scripts/`     – `ingest.py`, `chunk.py`, `benchmark.py`
-- `tests/`         – pytest unit + integration tests (no network calls)
-
+> **Built for:** HackerHouseGoa
 ---
 
-## Key Dependencies
+## Features
 
-| Package | Purpose |
-|---------|---------|
-| `fastapi`, `uvicorn` | HTTP server |
-| `pydantic` | Request/response schemas |
-| `datasets`, `pyarrow` | HF dataset metadata / local parquet loading |
-| **`duckdb`** | Remote parquet reading for MSMARCO-XI (see note below) |
-| `python-dotenv` | `.env` configuration |
+- **Voice input** in the browser, with automatic language detection (Sarvam AI `saaras:v3`), plus a typed-question fallback
+- **Retrieval-augmented answers** over AI4Bharat's MSMARCO-XI, the MS MARCO dataset translated into 14 Indic languages
+- **Cited sources** shown with every answer, plus end-to-end latency
+- **Refuses instead of hallucinating** when retrieved context is empty or low-scoring
+- **Guardrails** for input validation, prompt injection and off-topic queries, unsafe content, insufficient context, and hallucination
+- **Answer translation** into English and 10 Indian languages
+- **Smart retry:** a failed transcription or failed question can be retried without re-recording
+- **Fast retrieval path:** a scalar-quantised FAISS index with on-demand SQLite metadata lookups, aimed at a sub-200 ms `/ask` target
 
-### Why DuckDB for dataset loading?
+## How it works
 
-The MSMARCO-XI parquet files store the `passages` column as a nested struct
-containing list-typed sub-columns (`Translated_passages`, `English_passages`,
-`is_selected`). The `datasets` library's native streaming reader uses Arrow's
-C++ parquet backend, which raises:
+```mermaid
+flowchart LR
+    A["Mic audio (MediaRecorder)"] --> B["Sarvam AI speech-to-text"]
+    B --> C["POST /ask (FastAPI)"]
+    C --> D["Input guardrails"]
+    D --> E["Embed query (multilingual MiniLM)"]
+    E --> F["FAISS top-k search"]
+    F --> G["Gemini: grounded JSON answer"]
+    G --> H["Output guardrails"]
+    H --> I["Answer + cited sources"]
+```
+
+1. The React frontend records audio and sends it to Sarvam AI for transcription. Recordings are limited to 30 seconds by the Sarvam REST API.
+2. The transcript is sent to the FastAPI backend (`POST /ask`).
+3. The backend embeds the query with `paraphrase-multilingual-MiniLM-L12-v2` and searches the FAISS index.
+4. Gemini is prompted to answer **only** from the retrieved passages and returns structured JSON: `{ answer, grounded, insufficient }`.
+5. Guardrails check the result. If the context is empty, scores below the threshold (default `0.15`), or the model flags it as insufficient, the system returns a refusal.
+
+## Tech stack
+
+| Layer | Tools |
+|-------|-------|
+| Frontend | React 19, TypeScript, Vite, Vitest |
+| Speech-to-text | Sarvam AI (`saaras:v3`) |
+| Backend | Python, FastAPI, Pydantic |
+| Embeddings | sentence-transformers (`paraphrase-multilingual-MiniLM-L12-v2`) |
+| Vector search | FAISS (scalar-quantised fp16 index), SQLite for chunk metadata |
+| Generation | Google Gemini (`gemini-3.5-flash-lite`) via `google-genai` |
+| Data | AI4Bharat MSMARCO-XI, loaded with DuckDB |
+| Translation | deep-translator (Google Translate) |
+
+## API
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /` | Health check |
+| `POST /ask` | Body `{ "query": "..." }`. Returns `{ answer, sources[], latency_ms }` |
+| `POST /ask/stream` | Same pipeline, streamed as Server-Sent Events (`sources`, `token`, `done`) |
+| `POST /translate` | Body `{ "text": "...", "target_lang": "Hindi" }`. Returns `{ translated_text }` |
+
+Status codes: malformed or empty requests return `400`. Guardrail refusals (off-topic, unsafe, insufficient context) return `200` with the refusal message in `answer`, so clients don't need special handling for policy outcomes.
+
+Interactive docs are available at `http://127.0.0.1:8000/docs` when the server is running.
+
+## Project structure
 
 ```
-ArrowNotImplementedError: Nested data conversions not implemented for chunked array outputs
+backend/
+  api/          FastAPI app (/ask, /ask/stream, /translate)
+  common/       Interfaces (ABCs) and shared Pydantic schemas
+  ingestion/    MSMARCO-XI loader and normaliser
+  chunking/     Sentence, fixed-overlap and metadata-aware chunkers
+  embeddings/   Sentence-transformer and mock embedders
+  retrieval/    FAISS retriever, in-memory retriever
+  generation/   Gemini client, grounded prompting, refusal logic
+  harness/      Pipeline orchestrator and guardrails
+  scripts/      Ingest, chunk, embed, index, benchmark and diagnostic tools
+src/
+  components/   VoiceQA, RecordButton, AnswerView, SourcesList, ...
+  stt/          Sarvam speech-to-text client
+  api/          Typed client for the backend
+tests/          pytest unit and integration tests
 ```
 
-This is an upstream limitation with no fix available in current pyarrow/datasets
-versions. **DuckDB ships its own independent parquet reader** that handles nested
-list columns correctly, so `MSMarcoXILoader._iter_hf_streaming()` uses DuckDB +
-the `httpfs` extension to read remote parquet files over HTTPS. Local `.parquet`
-and `.jsonl` files still use the standard Python path.
-
----
-
-## Setup & Installation
+## Getting started
 
 ### Prerequisites
-- Python 3.10+
 
-### Virtual Environment
+- Python 3.10+ and Node.js 18+
+- A [Gemini API key](https://aistudio.google.com/) (without one, the backend falls back to a mock LLM)
+- A [Sarvam AI API key](https://dashboard.sarvam.ai/) for speech-to-text
+- An NVIDIA GPU with CUDA, **or** change `device="cuda"` to `device="cpu"` in `backend/api/main.py`
 
-```bash
-# Windows (PowerShell)
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-
-# macOS/Linux
-python -m venv .venv
-source .venv/bin/activate
-```
-
-### Install
+### 1. Backend
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
+cp .env.example .env             # then add GEMINI_API_KEY
 ```
 
-### Configure
+### 2. Build the search index
+
+The index files are generated artifacts and are not committed (`data/` and `*.faiss` are git-ignored). [Add a download link here if you host a prebuilt index.]
+
+To build it yourself, run the pipeline in order. Each script supports `--help` for its full options.
 
 ```bash
-copy .env.example .env   # Windows
-cp .env.example .env     # macOS/Linux
+# 1. Ingest a split of MSMARCO-XI into documents
+python -m backend.scripts.ingest --language hi --split validation --output data/processed/hi_val.jsonl
+
+# 2. Chunk documents (sentence-boundary chunking recommended)
+python -m backend.scripts.chunk --input data/processed/hi_val.jsonl \
+    --output data/chunks/hi_val_sentence.jsonl --strategy sentence --max-chars 500
+
+# 3. Embed chunks and build the vector index
+python -m backend.scripts.embed_and_index --input data/chunks/hi_val_sentence.jsonl \
+    --output-db data/indices/hi_val_multilingual_index.json --embedder sentence_transformer
+
+# 4. Convert to FAISS
+python -m backend.scripts.convert_to_faiss \
+    --input-index data/indices/hi_val_multilingual_index.json \
+    --output-faiss data/indices/hi_val_multilingual.faiss \
+    --output-metadata data/indices/hi_val_multilingual_metadata.jsonl
+
+# 5. Optional: shrink RAM with fp16 quantisation and move metadata to SQLite
+python -m backend.scripts.quantize_faiss_index --help
+python -m backend.scripts.migrate_metadata_to_sqlite --help
 ```
 
----
+The API loads `data/indices/hi_val_multilingual*.faiss` and its metadata at startup, so the shipped configuration searches the **Hindi validation split**. Other languages can be ingested with the same scripts (`as bn gu hi kn ml mr ne or pa sa ta te ur`).
 
-## Running the Pipeline
-
-### 1. Ingest dataset → Document JSONL
-
-```bash
-# Stream 500 rows of Hindi training data from HF Hub
-python -m backend.scripts.ingest \
-    --language hi \
-    --split train \
-    --max-rows 500 \
-    --output data/processed/hi_train.jsonl
-
-# All supported languages: as bn gu hi kn ml mr ne or pa sa ta te ur
-```
-
-### 2. Chunk documents → TextChunk JSONL
-
-```bash
-# Sentence-boundary chunking (recommended)
-python -m backend.scripts.chunk \
-    --input  data/processed/hi_train.jsonl \
-    --output data/chunks/hi_train_sentence.jsonl \
-    --strategy sentence \
-    --max-chars 500
-
-# Fixed-size + overlap (baseline)
-python -m backend.scripts.chunk \
-    --input  data/processed/hi_train.jsonl \
-    --output data/chunks/hi_train_fixed.jsonl \
-    --strategy fixed_overlap \
-    --chunk-size 500 --overlap 50
-
-# Metadata-aware (adapts by query_type and language)
-python -m backend.scripts.chunk \
-    --input  data/processed/hi_train.jsonl \
-    --output data/chunks/hi_train_meta.jsonl \
-    --strategy metadata_aware
-```
-
-### 3. Embed chunks → Index into Vector DB
-
-```bash
-# Embed text chunks and index into vector database
-python -m backend.scripts.embed_and_index \
-    --input data/chunks/hi_train_sentence.jsonl \
-    --output-db data/vector_db/hi_index.json \
-    --embedder mock \
-    --batch-size 32
-```
-
-### 4. Run the API server
+### 3. Run the API
 
 ```bash
 python -m uvicorn backend.api.main:app --reload
 ```
 
-Swagger UI: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
----
-
-## Embeddings & Vector DB Choices (Latency Rationale)
-
-To satisfy our hard **<200ms end-to-end `/ask` latency target**:
-
-1. **Embeddings (`IEmbedder`)**:
-   - **`SentenceTransformerEmbedder`** (`all-MiniLM-L6-v2` / `paraphrase-multilingual-MiniLM-L12-v2`):
-     Runs locally on CPU with **~5–25ms** inference latency per query. Zero external API calls or network hops.
-   - **`MockEmbedder`**: SHA-256 deterministic pseudo-random embedder for instant unit testing (<1ms).
-
-2. **Vector DB (`IVectorDB`)**:
-   - **`InMemoryVectorDB`**:
-     NumPy dot product cosine similarity with JSON disk persistence.
-     Provides sub-millisecond (**<1ms**) top-k similarity search over tens of thousands of vectors without requiring an external database process or native binary installation overhead.
-
-3. **Retriever (`IRetriever`) & Reranking**:
-   - **`retrieve(query, top_k=5, rerank=False)`**:
-     Public contract returning `List[RetrievedChunk]`.
-   - **Reranking Flag**: Gated behind `rerank=False` by default. Heavy cross-encoders add 150-300ms latency which risks exceeding our <200ms target. Setting `rerank=True` activates a lightweight lexical keyword overlap adjustment.
-
-4. **Generation (`IGenerator`) & Refusal Guardrails**:
-   - **`generate(question, retrieved_chunks)`**:
-     Constructs a strictly grounded prompt instructing the LLM to answer only using context passages.
-   - **Structured LLM Output**:
-     Uses `LLMGenerationOutput` schema: `{ "answer": str, "grounded": bool, "insufficient": bool }`.
-   - **Refusal / Insufficient-Information Path**:
-     Triggered when context is empty, max score is below configurable `score_threshold` (default `0.15`), or the LLM output indicates `insufficient=True`. Returns `GenerationResponse(is_refused=True, is_grounded=False)`.
-
-5. **Harness Orchestrator (`PipelineOrchestrator`) & Production Guardrails**:
-   - **`run_pipeline(query, k=5)`**:
-     Coordinates input validation, 5 guardrail evaluations, retrieval & generation timeouts/retries, and returns structured `AskResult`.
-   - **Guardrail Taxonomy**:
-     - `input_validation`: Sanitises query, rejects non-string, empty, or >2000 char queries (`invalid_input`).
-     - `off_topic`: Detects prompt injections and off-topic requests (`off_topic`).
-     - `query_safety` / `answer_safety`: Rejects unsafe/harmful content (`safety_violation`).
-     - `insufficient_context`: Surfaces missing or low-scoring context (<threshold) (`insufficient_context`).
-     - `hallucination`: NLI-style n-gram overlap check verifying answer claims against context (`hallucination_detected`).
-
----
-
-## Retriever Public Contract
-
-```python
-retrieve(query: str, top_k: int = 5, filters: dict = None, rerank: bool = False) -> List[RetrievedChunk]
-```
-
-Every returned `RetrievedChunk` conforms strictly to this schema:
-```json
-{
-  "text":        "verbatim text content",
-  "score":       0.92345,
-  "document_id": "doc123",
-  "metadata":    { "chunk_strategy": "sentence", "..." }
-}
-```
-
-## Chunk Schema (stable cross-team contract)
-
-Every chunking strategy produces JSONL with this exact schema. **Do not change field names.**
-
-```json
-{
-  "text":        "verbatim chunk text",
-  "document_id": "parent document id",
-  "metadata": {
-    "chunk_strategy": "sentence",
-    "chunk_index":    0,
-    "..."
-  }
-}
-```
-
-## API Endpoint Design Decisions
-
-The RAG backend exposes a single primary endpoint: `POST /ask`.
-
-### Request Schema
-```json
-{
-  "query": "What is the capital of India?"
-}
-```
-
-### Response Schema
-```json
-{
-  "answer": "...",
-  "sources": [
-    {
-      "document_id": "abc",
-      "text": "...",
-      "metadata": {}
-    }
-  ],
-  "latency_ms": 142.0
-}
-```
-
-### HTTP Status Code Strategy
-1. **Input Schema Validation (HTTP 400 Bad Request)**: 
-   If the incoming request is malformed (e.g. invalid JSON) or does not contain the required `query` field, or if the `query` field is an empty string/whitespace-only, the API returns `HTTP 400 Bad Request`. This explicitly signals client integration errors.
-   
-2. **Content Policy & Guardrails Refusals (HTTP 200 OK)**:
-   If a query is rejected due to active safety checks, off-topic detection, or low-scoring/insufficient context, the API returns a structured success payload (`HTTP 200 OK`) where the `answer` field contains the refusal/error message, `sources` is empty or low-scoring sources, and `latency_ms` is populated. This prevents the frontend/eval teams from having to implement custom exception handling or special-casing HTTP non-2xx status codes for content policy violations.
-
----
-
-## Running Tests
+### 4. Frontend
 
 ```bash
-pytest
+npm install
+cp .env.example .env     # set VITE_SARVAM_API_KEY (and VITE_API_BASE_URL if not localhost:8000)
+npm run dev
 ```
 
+Open the URL Vite prints, allow microphone access, and ask a question.
+
+## Testing
+
+```bash
+pytest          # backend: ingestion, chunking, retrieval, generation, guardrails, API
+npm test        # frontend: API client, STT client, VoiceQA component
+npm run lint
+```
+
+## Performance notes
+
+- Target: under 200 ms end-to-end for `/ask`.
+- Exhaustive FAISS search over roughly 1.07M 384-dimension vectors was benchmarked at about 154 ms on the development machine. The fp16 scalar-quantised index has similar latency with about half the RAM. [Re-run `backend/scripts/benchmark_faiss_retrieval.py` and add your own numbers.]
+- Cross-encoder reranking is off by default because it adds 150 to 300 ms. A lightweight keyword-overlap rerank is available with `rerank=True`.
+- Benchmark and profiling tools live in `backend/scripts/` (`benchmark.py`, `benchmark_embedding_latency.py`, `profile_ask_path.py`, `measure_ram.py`).
+
+## Known limitations
+
+- Speech input is capped at 30 seconds by the Sarvam REST endpoint.
+- The Sarvam key is read in the browser through a `VITE_` variable, so it is visible in the client bundle. For a public deployment, proxy transcription through the backend.
+- The shipped index covers Hindi only, although ingestion supports 14 languages.
+- The backend currently assumes a CUDA GPU unless you edit the device setting.
+
+## Acknowledgements
+
+[AI4Bharat](https://huggingface.co/datasets/ai4bharat/MSMARCO-XI) for MSMARCO-XI, [Sarvam AI](https://www.sarvam.ai/) for speech-to-text, Google for Gemini, and the FAISS and sentence-transformers communities.
 
